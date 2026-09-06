@@ -969,7 +969,66 @@ async fn wired_connection_lifecycle() {
                 panic!("managed veth interface {interface:?} was missing: {devices:?}")
             });
         assert_eq!(device.managed, Some(true));
+        let initial_autoconnect = device
+            .autoconnect
+            .expect("managed veth did not expose its autoconnect state");
         assert!(!device.path.is_empty());
+
+        bounded(
+            "disable autoconnect on the managed veth client",
+            DBUS_TIMEOUT,
+            nm.set_device_autoconnect(&interface, false),
+        )
+        .await
+        .expect("failed to disable device autoconnect");
+        let devices = bounded("refresh devices", DBUS_TIMEOUT, nm.list_wired_devices())
+            .await
+            .expect("failed to refresh wired devices");
+        let device = devices
+            .iter()
+            .find(|device| device.interface == interface)
+            .expect("veth disappeared after disabling autoconnect");
+        assert_eq!(device.autoconnect, Some(false));
+
+        bounded(
+            "restore autoconnect on the managed veth client",
+            DBUS_TIMEOUT,
+            nm.set_device_autoconnect(&interface, initial_autoconnect),
+        )
+        .await
+        .expect("failed to restore device autoconnect");
+
+        bounded(
+            "make the veth client unmanaged",
+            DBUS_TIMEOUT,
+            nm.set_device_managed(&interface, false),
+        )
+        .await
+        .expect("failed to make device unmanaged");
+        let devices = bounded("refresh unmanaged device", DBUS_TIMEOUT, nm.list_devices())
+            .await
+            .expect("failed to refresh devices after changing managed state");
+        let device = devices
+            .iter()
+            .find(|device| device.interface == interface)
+            .expect("veth disappeared after changing managed state");
+        assert_eq!(device.managed, Some(false));
+
+        bounded(
+            "restore the managed veth client",
+            DBUS_TIMEOUT,
+            nm.set_device_managed(&interface, true),
+        )
+        .await
+        .expect("failed to restore managed state");
+        let devices = bounded("refresh restored device", DBUS_TIMEOUT, nm.list_devices())
+            .await
+            .expect("failed to refresh devices after restoring managed state");
+        let device = devices
+            .iter()
+            .find(|device| device.interface == interface)
+            .expect("veth disappeared after restoring managed state");
+        assert_eq!(device.managed, Some(true));
 
         let details = bounded(
             "list detailed wired devices",
